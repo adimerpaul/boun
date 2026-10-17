@@ -17,6 +17,7 @@
         <q-input v-model="search" outlined dense debounce="350" class="col-12 col-md-4"
                  placeholder="Buscar por código, producto o categoría" clearable @update:model-value="load">
           <template #prepend><q-icon name="search" /></template>
+          <template #append><q-btn flat round dense icon="photo_camera" color="primary" @click="scanDialog=true"><q-tooltip>Escanear código de barras con la cámara</q-tooltip></q-btn></template>
         </q-input>
         <q-select v-model="category" :options="catalogs.categorias" option-label="nombre" outlined dense clearable
                   label="Categoría" class="col-12 col-md-3" @update:model-value="load" />
@@ -140,11 +141,15 @@
     <q-dialog v-model="marginDialog"><q-card style="width:430px;max-width:94vw"><q-card-section class="row items-center q-pb-sm"><q-icon name="percent" color="positive" size="22px" class="q-mr-sm"/><div><div class="text-subtitle1 text-weight-bold">Margen por porcentaje</div><div class="text-caption text-grey-7">Precio de venta = precio de compra + %</div></div><q-space/><q-btn flat round dense icon="close" v-close-popup/></q-card-section>
       <q-card-section class="q-pt-none q-gutter-sm"><q-option-group v-model="marginForm.alcance" :options="marginScopes" dense color="positive"/><q-select v-if="marginForm.alcance==='categoria'" v-model="marginForm.categoria_id" :options="catalogs.categorias" option-label="nombre" option-value="id" emit-value map-options outlined dense label="Categoría" @update:model-value="v=>{const m=categoryMargin(v);if(m!==null)marginForm.porcentaje=m}"/><q-input v-model.number="marginForm.porcentaje" type="number" min="0" step="0.5" outlined dense label="Margen" suffix="%" :hint="`Ej.: costo Bs 10 → venta Bs ${money(10*(1+(Number(marginForm.porcentaje)||0)/100))} · se saltan los productos sin costo`"/></q-card-section>
       <q-card-actions align="right"><q-btn flat no-caps label="Cancelar" v-close-popup/><q-btn unelevated no-caps color="positive" icon="done_all" label="Aplicar margen" :loading="marginSaving" @click="applyMargin"/></q-card-actions></q-card></q-dialog>
+    <!-- Búsqueda rápida con la cámara del celular: el código leído se usa como búsqueda. -->
+    <q-dialog v-model="scanDialog" :maximized="$q.screen.lt.sm"><q-card style="width:420px;max-width:96vw"><q-card-section class="row items-center q-pb-sm"><q-icon name="qr_code_scanner" color="primary" size="22px" class="q-mr-sm"/><div class="text-subtitle1 text-weight-bold">Escanear producto</div><q-space/><q-btn flat round dense icon="close" v-close-popup/></q-card-section>
+      <q-card-section class="q-pt-none"><EscanerCamara v-if="scanDialog" @detectado="onScanned"/><div class="text-caption text-grey-7 q-mt-sm text-center">Apunte la cámara al código de barras del producto</div></q-card-section></q-card></q-dialog>
   </q-page>
 </template>
 
 <script setup>
 import { computed, getCurrentInstance, onMounted, reactive, ref } from 'vue'
+import EscanerCamara from 'components/EscanerCamara.vue'
 const { proxy } = getCurrentInstance()
 const rows = ref([]), loading = ref(false), saving = ref(false), dialog = ref(false)
 const categoriesDialog = ref(false)
@@ -203,6 +208,8 @@ function onRequest ({ pagination: p }) {
     .catch(e => proxy.$alert.error(e.response?.data?.message || 'No se pudieron cargar los productos'))
     .finally(() => { loading.value=false })
 }
+const scanDialog = ref(false)
+function onScanned (code) { scanDialog.value=false; search.value=code; category.value=null; load() }
 function openExport () { if (!range.desde && !range.hasta) applyPreset(rangePresets[2]); exportDialog.value=true }
 function applyPreset (preset) { const [desde,hasta]=preset.rango(); range.desde=desde; range.hasta=hasta }
 async function download (type) {

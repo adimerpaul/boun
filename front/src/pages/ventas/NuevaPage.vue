@@ -3,10 +3,22 @@
     <div class="row items-center q-mb-sm">
       <div><div class="text-subtitle1 text-weight-bold">Nueva venta</div><div class="text-caption text-grey-7">Busca el producto, indica la cantidad y confirma el cobro</div></div>
       <q-space/><q-btn dense flat icon="receipt_long" label="Ver ventas" no-caps to="/ventas"/>
+      <!-- Acciones rápidas (inicio del inventario): cargar productos con la cámara o vender escaneando. -->
+      <q-btn round dense unelevated color="positive" icon="more_vert" class="q-ml-xs"><q-tooltip>Acciones rápidas</q-tooltip>
+        <q-menu auto-close anchor="bottom right" self="top right"><q-list dense style="min-width:250px">
+          <q-item v-if="canQuickLoad" clickable @click="openQuickLoad(true)"><q-item-section avatar><q-icon name="qr_code_scanner" color="positive"/></q-item-section><q-item-section><q-item-label>Escanear y cargar producto</q-item-label><q-item-label caption>Cámara: crear, actualizar o sumar stock</q-item-label></q-item-section></q-item>
+          <q-item v-if="canQuickLoad" clickable @click="openQuickLoad(false)"><q-item-section avatar><q-icon name="add_box" color="positive"/></q-item-section><q-item-section><q-item-label>Crear producto rápido</q-item-label><q-item-label caption>Buscar por código y comprar rápido</q-item-label></q-item-section></q-item>
+          <q-item clickable @click="saleScanDialog=true"><q-item-section avatar><q-icon name="photo_camera" color="positive"/></q-item-section><q-item-section><q-item-label>Vender con la cámara</q-item-label><q-item-label caption>Lee el código y lo agrega al carrito</q-item-label></q-item-section></q-item>
+          <q-separator/>
+          <q-item v-if="$store.hasPermission('Crear Compras')" clickable to="/compras/nueva"><q-item-section avatar><q-icon name="add_business" color="grey-7"/></q-item-section><q-item-section>Nueva compra</q-item-section></q-item>
+        </q-list></q-menu>
+      </q-btn>
     </div>
     <div class="row q-col-gutter-sm">
       <div class="col-12 col-md-7">
-        <q-card flat bordered>
+        <!-- Pestañas en la misma pantalla: vender o cargar productos/stock rápido (cámara o código). -->
+        <q-tabs v-if="canQuickLoad" v-model="leftTab" dense no-caps inline-label align="left" class="text-grey-8 q-mb-xs" active-color="positive" indicator-color="positive"><q-tab name="vender" icon="point_of_sale" label="Vender"/><q-tab name="carga" icon="qr_code_scanner" label="Carga rápida"/></q-tabs>
+        <q-card v-show="leftTab==='vender'" flat bordered>
           <q-card-section class="row q-col-gutter-sm q-pa-sm">
             <q-input ref="searchInput" v-model="search" dense outlined autofocus clearable class="col" placeholder="Buscar nombre, código o escanear etiqueta de balanza" @update:model-value="handleSearchInput" @keydown.enter.prevent="addExact(true,$event.target.value)" @keydown.down.prevent="focusGrid">
               <template #prepend><q-icon name="qr_code_scanner"/></template>
@@ -32,6 +44,7 @@
             <q-pagination v-model="productsPage" :max="productsLastPage" :max-pages="6" boundary-numbers direction-links color="primary" size="sm" @update:model-value="loadProducts"/>
           </q-card-actions>
         </q-card>
+        <q-card v-if="leftTab==='carga'" flat bordered><q-card-section class="q-pa-sm"><ProductoRapido :key="quickLoadKey" :con-camara="quickLoadCamera" @guardado="loadProducts"/></q-card-section></q-card>
       </div>
 
       <div class="col-12 col-md-5">
@@ -101,6 +114,7 @@
         <q-separator/><q-card-actions align="right" class="q-pa-sm bg-white"><q-btn flat dense label="Volver" no-caps v-close-popup/><q-btn color="positive" dense unelevated icon="save" label="Guardar venta · Enter" no-caps :loading="saving" @click="confirmSale"/></q-card-actions>
       </q-card>
     </q-dialog>
+    <q-dialog v-model="saleScanDialog" :maximized="$q.screen.lt.sm"><q-card style="width:460px;max-width:96vw"><q-card-section class="row items-center q-py-sm"><q-icon name="photo_camera" color="positive" size="22px" class="q-mr-sm"/><b>Vender con la cámara</b><q-space/><q-btn flat round dense icon="close" v-close-popup/></q-card-section><q-card-section class="q-pa-sm"><EscanerCamara v-if="saleScanDialog" @detectado="scanToCart"/><div class="text-caption text-grey-7 q-mt-xs">Apunta al código de barras o QR del producto.</div></q-card-section></q-card></q-dialog>
   </q-page>
 </template>
 
@@ -108,6 +122,8 @@
 import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { printSale } from '../../addons/ventaPrint'
 import { armarVentaOffline, guardarVentaOffline, nuevoUuid } from '../../addons/ventasOffline'
+import EscanerCamara from 'components/EscanerCamara.vue'
+import ProductoRapido from 'components/ProductoRapido.vue'
 const {proxy}=getCurrentInstance()
 const products=ref([]),categories=ref([]),search=ref(''),category=ref(null),saving=ref(false),searchInput=ref(null)
 // Varios carritos abiertos a la vez (5): se atiende a más de un cliente sin perder lo cargado.
@@ -131,6 +147,11 @@ let processingBarcode=false,productsSearchTimer=null,checkoutOpenedAt=0
 const photoUrl=path=>`${proxy.$imgBase}/images/${path}`,money=v=>Number(v||0).toFixed(2)
 // Sin este permiso el precio de la línea queda fijo al del catálogo (el backend responde 403 si igual se manda otro).
 const canEditPrice=computed(()=>proxy.$store.hasPermission('Modificar Precio en Venta'))
+// Acciones rápidas del menú verde: carga de productos/stock (inventario inicial) y venta escaneando con la cámara.
+const canQuickLoad=computed(()=>proxy.$store.hasPermission('Crear Productos')||proxy.$store.hasPermission('Crear Compras')),leftTab=ref('vender'),quickLoadKey=ref(0),quickLoadCamera=ref(false),saleScanDialog=ref(false)
+function openQuickLoad(camera){quickLoadCamera.value=camera;quickLoadKey.value++;leftTab.value='carga'}
+watch(leftTab,v=>{if(v==='vender')focusSearch()})
+function scanToCart(code){saleScanDialog.value=false;addExact(true,code)}
 const isWeighted=item=>item?.unidad==='KG',quantityStep=item=>isWeighted(item)?0.001:1,minimumQty=item=>quantityStep(item)
 const quantity=(value,unit)=>Number(value||0).toFixed(unit==='KG'?3:0)
 const subtotal=computed(()=>cart.value.reduce((sum,i)=>sum+Number(i.precio_venta)*i.cantidad,0))

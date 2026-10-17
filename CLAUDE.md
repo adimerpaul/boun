@@ -57,7 +57,9 @@ Los tests corren sobre SQLite en memoria (`back/phpunit.xml`) y usan `RefreshDat
 `DatabaseSeeder` está vacío a propósito. Todo el bootstrap de datos ocurre dentro de migraciones:
 
 - `2026_07_28_060000_load_initial_inventory.php` — crea permisos base y el usuario `admin` (ADMINISTRADOR BUON PREZZO) con todos los permisos.
-- `2026_07_28_100000_create_test_catalog.php` — borra y recrea el catálogo de prueba: 10 categorías × 10 productos (`BP-####`). `CatalogoPruebaTest` verifica esos 100/10 exactos.
+- `2026_07_28_100000_create_test_catalog.php` — catálogo de prueba histórico (10 categorías × 10 productos `BP-####`); lo da de baja la migración siguiente.
+- `2026_10_19_000000_load_bean_catalog.php` — carga el **catálogo real** (categorías y productos de Bean) desde `back/database/data/catalogo_bean.json`, con stock en 0 (se carga con un Almacén). Soft-deletea los `BP-%` y las categorías de prueba vacías; los productos que ya existen por código no se tocan. `CatalogoPruebaTest` verifica que coincida con el JSON.
+- `2026_10_19_010000_load_product_images.php` — copia las fotos de `back/database/data/imagenes/productos/{codigo}.webp` a `public/images/productos/` y fija `foto`, sólo en productos sin foto o con el archivo ausente; también el logo de la empresa. Para agregar fotos al despliegue: poner el `.webp` con el código del producto en esa carpeta y crear otra migración igual.
 - Las migraciones posteriores registran sus propios permisos (`Ver/Crear/Anular Ventas`, `Ver/Crear Compras`, `Gestionar Configuración`) y se los dan al `admin`.
 
 Al agregar una funcionalidad con permisos nuevos, seguir ese patrón: `Permission::firstOrCreate(...)` + `givePermissionTo` al admin dentro de la migración de la feature.
@@ -101,6 +103,10 @@ Los detalles de venta/compra son **snapshots**: copian `codigo`, `nombre`, `unid
 - Permisos (grupo `Almacén`): `Ver/Crear/Editar/Aplicar/Anular Almacenes`. `Aplicar` está separado a propósito: quien cuenta no es necesariamente quien autoriza el ajuste.
 - Frontend, tres páginas: `almacenes/IndexPage.vue` (listado + diálogo de creación), `almacenes/LlenarPage.vue` (`/almacenes/:id`, contar) y `almacenes/AvancePage.vue` (`/almacenes/:id/avance`, control y botón de aplicar).
 - `tests/Feature/AlmacenTest.php` cubre conteo → aplicación (sobrante y faltante) → anulación, el 409 por producto duplicado, el bloqueo al aplicar y los permisos.
+
+### Carga rápida (en Nueva venta)
+
+`ventas/NuevaPage.vue` tiene un botón verde de tres puntos y una pestaña **"Carga rápida"** junto a "Vender" (misma pantalla, a pedido del cliente: no hacer página aparte). Usa `components/ProductoRapido.vue`: código por cámara (`components/EscanerCamara.vue`, librería `html5-qrcode`) o teclado → si el producto existe se actualiza (`PUT /productos`), si no se crea (`POST /productos`); con cantidad > 0 registra una compra de una línea (`POST /compras`, comentario "Compra rápida", proveedor recordado en `localStorage.proveedorRapidoBuonPrezzo`; si no hay proveedores crea "PROVEEDOR GENERAL"). Sirve para el inventario inicial. "Vender con la cámara" lee el código y lo pasa a `addExact`. La cámara sólo abre en HTTPS o localhost.
 
 ### Productos por peso
 
