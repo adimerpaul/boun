@@ -4,10 +4,14 @@ namespace App\Exports\Comun;
 
 use Carbon\Carbon;
 use Maatwebsite\Excel\Concerns\FromArray;
+use Maatwebsite\Excel\Concerns\WithCustomValueBinder;
 use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithTitle;
 use Maatwebsite\Excel\Events\AfterSheet;
+use PhpOffice\PhpSpreadsheet\Cell\Cell;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\Cell\DefaultValueBinder;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
@@ -19,7 +23,7 @@ use PhpOffice\PhpSpreadsheet\Worksheet\PageSetup;
  * fecha/usuario, filtros), tabla con autofiltro, panel congelado, formatos
  * numéricos por columna y fila de totales.
  */
-abstract class HojaBase implements FromArray, WithEvents, WithTitle
+abstract class HojaBase implements FromArray, WithCustomValueBinder, WithEvents, WithTitle
 {
     protected const NEGRO = '171717';
 
@@ -61,6 +65,24 @@ abstract class HojaBase implements FromArray, WithEvents, WithTitle
     protected function columnasCalculadas(): array
     {
         return $this->columnasCache ??= $this->columnas();
+    }
+
+    /**
+     * Los textos se escriben como texto: si no, Excel convierte códigos de barras
+     * ("7774112102268", "0521817") en números y pierde dígitos o ceros a la izquierda.
+     * Sólo en las columnas de formato texto; el resto sigue la detección por defecto.
+     */
+    public function bindValue(Cell $cell, $value): bool
+    {
+        $columna = $this->columnasCalculadas()[Coordinate::columnIndexFromString($cell->getColumn()) - 1] ?? null;
+        if ($cell->getRow() > self::FILA_CABECERA && ($columna['formato'] ?? 'texto') === 'texto'
+            && is_string($value) && $value !== '' && ! str_starts_with($value, '=')) {
+            $cell->setValueExplicit($value, DataType::TYPE_STRING);
+
+            return true;
+        }
+
+        return (new DefaultValueBinder)->bindValue($cell, $value);
     }
 
     abstract public function title(): string;
@@ -137,6 +159,8 @@ abstract class HojaBase implements FromArray, WithEvents, WithTitle
             }
 
             $this->configurarImpresion($hoja, $ultimaColumna);
+            // El binder es estático en PhpSpreadsheet: se restaura para no afectar a otras hojas ni lecturas.
+            Cell::setValueBinder(new DefaultValueBinder);
         }];
     }
 
